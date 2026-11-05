@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Undo and Redo Stack App</title>
+<style>
+:root{
+  --bg:#f4f6fb;--card:#ffffff;--ink:#1c2433;--muted:#5b667a;--line:#dbe1ee;
+  --undo:#1d5fa8;--undo-bg:#e3effc;
+  --redo:#6b3fb0;--redo-bg:#efe6fb;
+  --doc-bg:#fffdf5;
+  --btn:#1d5fa8;--btn-ink:#ffffff;
+  color-scheme:light;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#10151f;--card:#19212e;--ink:#e8edf6;--muted:#9eaac0;--line:#2c384b;
+    --undo:#7db4ee;--undo-bg:#16304b;
+    --redo:#c4a5f2;--redo-bg:#2b1d46;
+    --doc-bg:#1f2735;
+    --btn:#4a90de;--btn-ink:#0b1420;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#10151f;--card:#19212e;--ink:#e8edf6;--muted:#9eaac0;--line:#2c384b;
+  --undo:#7db4ee;--undo-bg:#16304b;
+  --redo:#c4a5f2;--redo-bg:#2b1d46;
+  --doc-bg:#1f2735;
+  --btn:#4a90de;--btn-ink:#0b1420;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:Georgia,"Times New Roman",serif;line-height:1.55}
+main{max-width:760px;margin:0 auto;padding:20px 16px 48px}
+h1{font-size:1.7rem;margin:0 0 4px}
+h2{font-size:1.15rem;margin:0 0 10px}
+p{margin:0 0 10px}
+.sub{color:var(--muted);margin-bottom:18px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px}
+.ui{font-family:system-ui,-apple-system,"Segoe UI",Arial,sans-serif}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+input{flex:1 1 180px;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit;font-size:1rem}
+button{font:inherit;font-size:1rem;padding:10px 14px;border-radius:8px;border:1px solid var(--btn);background:var(--btn);color:var(--btn-ink);cursor:pointer}
+button.ghost{background:transparent;color:var(--btn)}
+button.u{background:var(--undo);border-color:var(--undo);color:var(--btn-ink)}
+button.r{background:var(--redo);border-color:var(--redo);color:var(--btn-ink)}
+button:disabled{opacity:.4;cursor:not-allowed}
+button:focus-visible,input:focus-visible{outline:3px solid var(--redo);outline-offset:2px}
+.paper{min-height:72px;padding:14px;border:1px solid var(--line);border-radius:8px;background:var(--doc-bg);font-size:1.1rem;margin-bottom:12px;overflow-wrap:anywhere}
+.paper.empty{color:var(--muted);font-style:italic}
+.stacks{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.col h3{font-size:1rem;margin:0 0 4px}
+.col small{display:block;color:var(--muted);margin-bottom:8px}
+.col.u h3{color:var(--undo)}.col.r h3{color:var(--redo)}
+.pile{display:flex;flex-direction:column;gap:6px;min-height:60px;padding:8px;border:2px dashed var(--line);border-radius:8px}
+.item{padding:8px 10px;border-radius:6px;font-size:.92rem;overflow-wrap:anywhere}
+.u .item{background:var(--undo-bg);border-left:5px solid var(--undo)}
+.r .item{background:var(--redo-bg);border-left:5px solid var(--redo)}
+.item.top{font-weight:700}
+.item em{font-style:normal;font-size:.75rem;color:var(--muted);display:block}
+.empty-note{color:var(--muted);font-style:italic;font-size:.9rem}
+ol.log{margin:0;padding-left:20px;font-size:.92rem;max-height:160px;overflow:auto}
+.pu{color:var(--undo)}.po{color:var(--redo)}
+pre{margin:0;padding:12px;background:var(--bg);border:1px solid var(--line);border-radius:8px;overflow-x:auto;font-size:.82rem;line-height:1.45}
+ul{padding-left:20px;margin:0}li{margin-bottom:6px}
+@media (max-width:420px){.stacks{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+  <h1>Undo and redo with stacks</h1>
+  <p class="sub">Type some words, then undo and redo them. Two stacks make it work.</p>
+
+  <section class="card ui">
+    <h2>1. Your document</h2>
+    <div class="paper empty" id="paper">Nothing written yet.</div>
+    <div class="row">
+      <input id="word" placeholder="Type a word or phrase" maxlength="30" aria-label="Text to add">
+      <button id="add">Add text</button>
+      <button id="del" class="ghost">Delete last word</button>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button id="undo" class="u">Undo</button>
+      <button id="redo" class="r">Redo</button>
+    </div>
+  </section>
+
+  <section class="card ui">
+    <h2>2. The two stacks</h2>
+    <div class="stacks">
+      <div class="col u"><h3>Undo stack</h3><small>Every action is pushed here.</small><div class="pile" id="us"></div></div>
+      <div class="col r"><h3>Redo stack</h3><small>Undone actions wait here.</small><div class="pile" id="rs"></div></div>
+    </div>
+    <p style="margin:10px 0 0;font-size:.9rem;color:var(--muted)">The bold item at the top of each pile is the one that moves next.</p>
+  </section>
+
+  <section class="card ui">
+    <h2>What the stacks just did</h2>
+    <ol class="log" id="log"></ol>
+  </section>
+
+  <section class="card">
+    <h2>Why the stack is important in this app</h2>
+    <ul>
+      <li><b>Latest first.</b> Undo must reverse your most recent action, not an old one. A stack always gives back the last item added, so this happens automatically.</li>
+      <li><b>Step by step history.</b> Pressing undo again and again walks back through every action in the exact reverse order.</li>
+      <li><b>Redo needs a stack too.</b> Each undone action is pushed onto the redo stack, so it can be brought back in the right order.</li>
+      <li><b>A new action clears redo.</b> Once you do something new, the old future no longer applies, so the redo stack is emptied.</li>
+      <li><b>Fast.</b> Push and pop only touch the top, so undo stays quick however long the history is.</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2>The stack code behind the app</h2>
+    <pre>class Stack {
+  constructor() { this.items = []; }
+  push(x)     { this.items.push(x); }       // add on top
+  pop()       { return this.items.pop(); }  // remove from top
+  peek()      { return this.items[this.items.length - 1]; }
+  isEmpty()   { return this.items.length === 0; }
+  size()      { return this.items.length; }
+}</pre>
+  </section>
+</main>
+
+<script>
+class Stack {
+  constructor() { this.items = []; }
+  push(x) { this.items.push(x); }
+  pop() { return this.items.pop(); }
+  peek() { return this.items[this.items.length - 1]; }
+  isEmpty() { return this.items.length === 0; }
+  size() { return this.items.length; }
+}
+
+var undoS = new Stack();
+var redoS = new Stack();
+var doc = "";
+var $ = function (id) { return document.getElementById(id); };
+
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+  });
+}
+function label(a) { return (a.type === "add" ? "Added " : "Deleted ") + "\u201c" + a.text + "\u201d"; }
+
+function log(kind, text) {
+  var li = document.createElement("li");
+  li.className = kind;
+  li.textContent = text;
+  $("log").insertBefore(li, $("log").firstChild);
+}
+
+function addText(t) { doc = doc ? doc + " " + t : t; }
+function removeText(t) {
+  doc = doc.length === t.length ? "" : doc.slice(0, doc.length - t.length - 1);
+}
+function apply(a) { if (a.type === "add") addText(a.text); else removeLast(); }
+function reverse(a) { if (a.type === "add") removeText(a.text); else addText(a.text); }
+function removeLast() {
+  var i = doc.lastIndexOf(" ");
+  doc = i < 0 ? "" : doc.slice(0, i);
+}
+
+function doAction(a) {
+  apply(a);
+  undoS.push(a);
+  log("pu", "Push to undo stack: " + label(a) + ".");
+  if (!redoS.isEmpty()) { redoS.items = []; log("po", "Redo stack cleared because you did something new."); }
+  render();
+}
+
+$("add").onclick = function () {
+  var t = $("word").value.trim();
+  if (!t) { log("po", "Type something first."); return; }
+  doAction({ type: "add", text: t });
+  $("word").value = "";
+  $("word").focus();
+};
+$("word").onkeydown = function (e) { if (e.key === "Enter") $("add").click(); };
+
+$("del").onclick = function () {
+  if (!doc) { log("po", "The document is already empty."); return; }
+  var i = doc.lastIndexOf(" ");
+  var last = i < 0 ? doc : doc.slice(i + 1);
+  doAction({ type: "del", text: last });
+};
+
+$("undo").onclick = function () {
+  if (undoS.isEmpty()) return;
+  var a = undoS.pop();
+  reverse(a);
+  redoS.push(a);
+  log("po", "Pop from undo stack, push to redo stack: " + label(a) + " reversed.");
+  render();
+};
+$("redo").onclick = function () {
+  if (redoS.isEmpty()) return;
+  var a = redoS.pop();
+  apply(a);
+  undoS.push(a);
+  log("pu", "Pop from redo stack, push to undo stack: " + label(a) + " again.");
+  render();
+};
+
+function pile(stack, id) {
+  var items = stack.items.slice().reverse();
+  $(id).innerHTML = items.length
+    ? items.map(function (a, i) {
+        return '<div class="item' + (i === 0 ? " top" : "") + '">' + esc(label(a)) + (i === 0 ? "<em>top</em>" : "") + "</div>";
+      }).join("")
+    : '<span class="empty-note">Empty</span>';
+}
+
+function render() {
+  var p = $("paper");
+  p.textContent = doc || "Nothing written yet.";
+  p.className = "paper" + (doc ? "" : " empty");
+  pile(undoS, "us");
+  pile(redoS, "rs");
+  $("undo").disabled = undoS.isEmpty();
+  $("redo").disabled = redoS.isEmpty();
+}
+render();
+</script>
+</body>
+</html>
